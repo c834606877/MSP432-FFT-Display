@@ -8,24 +8,72 @@ class MSP432(object):
     """docstring for msp432"""
     def __init__(self):
         self.ser = serial.Serial('COM4', 115200, timeout=1)
+        self.rate = 8000
 
     def getPortName(self):
         return self.ser.name
 
     def get256data(self):
-        self.ser.write('r')
+        self.ser.write('ACK=rfft')
         return self.ser.read(256)
     def get512data(self):
-        self.ser.write('r')
+        self.ser.write('ACK=rfft')
         return self.ser.read(512)
     def setSamplingRate(self, rate = 8000):
         print rate
+        self.rate = rate
         if rate == 8000:
-            self.ser.write('s1')
+            self.ser.write('ACK=s1')
         elif rate == 16000:
-            self.ser.write('s2')
+            self.ser.write('ACK=s2')
         elif rate == 32000:
-            self.ser.write('s3')
+            self.ser.write('ACK=s3')
+
+    def readPCMtoWave(self):
+        self.ser.write('ACK=pcmon')
+        file = open('c:/1.wav', 'wb')
+        count = 0
+        try:
+            while True:
+                pcmdata = self.ser.read(1024)
+                if pcmdata is None or  len(pcmdata) == 0:
+                    break
+                hexShow(pcmdata)
+                file.write(pcmdata)
+                count = count + 1
+                if count > 100:
+                    self.stopPCM()
+        except Exception as e:
+            print 'MSP432: PCMoffline', e
+        finally:
+            file.close()
+        
+
+        # import wave
+        # wavfile =  wave.open('c:/1.wav', 'wb')
+        # wavfile.setparams((1, 2, self.rate, 0, 'NONE', 'NONE'))
+        # try:
+        #     while True:
+        #         pcmdata = self.ser.read(1024)
+        #         hexShow(pcmdata)
+        #         wavfile.writeframesraw(pcmdata)
+        # except Exception as e:
+        #     print 'MSP432: PCMoffline', e
+
+        # finally:
+        #     wavfile.close()
+
+    def stopPCM(self):
+        self.ser.write('ACK=pcmoff')
+
+
+
+
+        
+
+
+
+
 
 
 class Wnd(Frame):
@@ -63,7 +111,7 @@ class Wnd(Frame):
         self.quitButton.grid()
 
 
-    def updateData(self):
+    def updateDataFFT(self):
         s = msp432.get512data()
         hexShow(s)
         # print '\n'
@@ -78,8 +126,15 @@ class Wnd(Frame):
             # self.cavs.create_line(i*2,128-(ord(s[i])+ord(s[i+1]))/4,i*2,128,fill='black')
             # self.cavs.create_line(i*2+1,0,i*2+1,128-(ord(s[i]) + ord(s[i+1]))/4,fill='white')
             # self.cavs.create_line(i*2+1,128-(ord(s[i])+ord(s[i+1]))/4,i*2+1,128,fill='black')
-            
-        self.after(100,self.updateData)
+        self.after(80,self.updateDataFFT)
+
+    def updateData(self):
+        #msp432.readPCMtoWave()
+        #self.quit()
+        self.updateDataFFT()
+
+
+       
 
 
 def hexShow(argv):    

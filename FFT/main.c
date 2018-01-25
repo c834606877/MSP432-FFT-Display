@@ -45,6 +45,7 @@
 #include <ti/grlib/grlib.h>
 #include "LcdDriver/Crystalfontz128x128_ST7735.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "arm_math.h"
 #include "arm_const_structs.h"
 
@@ -90,7 +91,8 @@ volatile int mainloop_count = 0;
 volatile int dma_done = 0;
 
 int s2_Debounce = 0;
-int bSend = 0;
+int bSendRfft = 0;
+int bSendPCM = 0;
 
 uint32_t color = 0;
 
@@ -360,11 +362,11 @@ void main(void)
     while(1)
     {
 
-        MAP_PCM_gotoLPM0();
+        //MAP_PCM_gotoLPM0();
         BUZZER_toggle();
         Sample_Freq_toggle();
 
-        if(! dma_done)
+        if(! dma_done )
             continue;
         dma_done = 0;
 
@@ -401,7 +403,7 @@ void main(void)
         {
             data_output[i/2] = (int32_t)(sqrtf((data_input[i] * data_input[i]) + (data_input[i+1] * data_input[i+1])));
         }
-/*
+
         q15_t maxValue;
         uint32_t maxIndex = 0;
 
@@ -416,7 +418,7 @@ void main(void)
         else
             color = ((0xFF - (uint32_t)(0xFF * ((maxIndex-192) / 64.0f))) << 8) + 0xFF0000;
 
-        / Draw frequency bin graph /
+        /* Draw frequency bin graph */
         for (i = 0; i < 256; i+=2)
         {
             int x = min(100, (int)((data_output[i]+data_output[i+1])/8));
@@ -426,14 +428,14 @@ void main(void)
             Graphics_setForegroundColor(&g_sContext, color);
             Graphics_drawLineV(&g_sContext, i/2, 114, 114 - x);
         }
-*/
 
-        if(bSend == 1 )
+
+
+
+
+        if(bSendRfft == 1 )
         {
-            bSend = 0;
-
-
-
+            bSendRfft = 0;
             /* Setup the TX transfer characteristics & buffers */
             MAP_DMA_setChannelControl(DMA_CH0_EUSCIA0TX | UDMA_PRI_SELECT,
             UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE | UDMA_ARB_1);
@@ -445,6 +447,31 @@ void main(void)
             MAP_DMA_enableChannel(0);
 
         }
+
+        if(bSendPCM)
+        {
+            if(switch_data & 1)
+            {
+                /* Setup the TX transfer characteristics & buffers */
+                MAP_DMA_setChannelControl(DMA_CH0_EUSCIA0TX | UDMA_PRI_SELECT,
+                        UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE | UDMA_ARB_1);
+                MAP_DMA_setChannelTransfer(DMA_CH0_EUSCIA0TX | UDMA_PRI_SELECT,
+                        UDMA_MODE_BASIC, data_array1,
+                        (void *) MAP_SPI_getTransmitBufferAddressForDMA(EUSCI_A0_BASE),
+                        SAMPLE_LENGTH * 2); //short are occupied 2 bytes.
+            }else {
+                /* Setup the TX transfer characteristics & buffers */
+                MAP_DMA_setChannelControl(DMA_CH0_EUSCIA0TX | UDMA_PRI_SELECT,
+                        UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE | UDMA_ARB_1);
+                MAP_DMA_setChannelTransfer(DMA_CH0_EUSCIA0TX | UDMA_PRI_SELECT,
+                        UDMA_MODE_BASIC, data_array2,
+                        (void *) MAP_SPI_getTransmitBufferAddressForDMA(EUSCI_A0_BASE),
+                        SAMPLE_LENGTH * 2); //short are occupied 2 bytes.
+            }
+
+            MAP_DMA_enableChannel(0);
+        }
+
 
 
 
@@ -534,6 +561,9 @@ void DMA_INT1_IRQHandler(void)
     }
     interupt_count++;
 
+
+
+
     dma_done = 1;
 
 }
@@ -544,15 +574,105 @@ void DMA_INT1_IRQHandler(void)
  * EUSCI A0 UART interrupt handler.
  */
 
-int receivedLen = 0;
+//int receivedLen = 0;
+int bytesReceived = 7;
+uint8_t buffer[6];
+uint8_t start[4];
 void EUSCIA0_IRQHandler(void)
 {
 
     int receiveByte = UART_receiveData(EUSCI_A0_BASE);
 
+
+
+    //UART_transmitData(EUSCI_A0_BASE,(uint8_t)bytesReceived);
+    if(bytesReceived > 6)
+    {
+        start[0] = start[1];
+        start[1] = start[2];
+        start[2] = start[3];
+        start[3] = receiveByte;
+
+        if (start[0] == 'A' && start[1] == 'C' && start[2] == 'K' && start[3] == '=')
+            bytesReceived = -1;
+    }
+    else
+    {
+        // Reviving command bytes , buffer len is 6.
+        buffer[bytesReceived] = receiveByte;
+        if(bytesReceived == 3 &&
+                memcmp(buffer, "rfft", 4) == 0)
+        {
+            // avoid PCM are using UART
+            if(bSendPCM == 0)
+                bSendRfft = 1;
+
+            // match completed, set buffer to end
+            bytesReceived = 7;
+        /*}else if(bytesReceived == 5 &&
+                memcmp((void *)buffer, (void *)"fftoff", 6) == 0)
+        {
+                bSendRfft = 0;
+
+            // match completed, set buffer to end
+            bytesReceived = 7;*/
+        }else if (bytesReceived == 1 && memcmp(buffer, "s1", 2) == 0){
+            sample_freq = 8000;
+            // set Sample Freq
+            TIMER_A3->CCR[0] = SMCLK_FREQUENCY / sample_freq;
+            TIMER_A3->CCR[1] = ( SMCLK_FREQUENCY / sample_freq ) / 2;
+
+            // set buffer to end
+            bytesReceived = 7;
+        }else if (bytesReceived == 1 && memcmp(buffer, "s2", 2) == 0){
+            sample_freq = 16000;
+            // set Sample Freq
+            TIMER_A3->CCR[0] = SMCLK_FREQUENCY / sample_freq;
+            TIMER_A3->CCR[1] = ( SMCLK_FREQUENCY / sample_freq ) / 2;
+
+            // set buffer to end
+            bytesReceived = 7;
+        }else if (bytesReceived == 1 && memcmp(buffer, "s3", 2) == 0){
+            sample_freq = 32000;
+            // set Sample Freq
+            TIMER_A3->CCR[0] = SMCLK_FREQUENCY / sample_freq;
+            TIMER_A3->CCR[1] = ( SMCLK_FREQUENCY / sample_freq ) / 2;
+
+            // set buffer to end
+            bytesReceived = 7;
+        }else if (bytesReceived == 4 && memcmp(buffer, "pcmon", 5) == 0){
+
+            if(bSendRfft == 0)
+                bSendPCM = 1;
+
+            // set buffer to end
+            bytesReceived = 7;
+        }else if (bytesReceived == 5 && memcmp(buffer, "pcmoff", 6) == 0){
+             bSendPCM = 0;
+
+             // set buffer to end
+             bytesReceived = 7;
+        }
+
+
+        else
+        {
+
+
+        }
+
+    }
+    //not matched any command yet.
+    if(bytesReceived<7)
+        bytesReceived++;
+
+
+
+/*
+
     if(receiveByte == 'r')
     {   // request fft calculated  result
-        bSend = 1;
+        bSendRfft = 1;
         receivedLen = 0;
     }
     else if(receiveByte == 's')
@@ -586,7 +706,7 @@ void EUSCIA0_IRQHandler(void)
     }
 
 
-
+*/
 
 //    char str[20];
 //    sprintf(str, "%2x", receiveByte);

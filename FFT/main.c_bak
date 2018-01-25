@@ -1,0 +1,172 @@
+#include "msp.h"
+#include "LcdDriver/Crystalfontz128x128_ST7735.h"
+#include <ti/grlib/grlib.h>
+#include "images/images.h"
+#include <ti/grlib/button.h>
+#include <ti/grlib/imageButton.h>
+#include <ti/grlib/radioButton.h>
+#include <ti/grlib/checkbox.h>
+
+Graphics_Context g_sContext;
+Graphics_ImageButton primitiveButton;
+Graphics_ImageButton imageButton;
+Graphics_Button yesButton;
+Graphics_Button noButton;
+
+/* Timer_A PWM Configuration Parameter */
+Timer_A_PWMConfig pwmConfig =
+{
+    TIMER_A_CLOCKSOURCE_SMCLK,
+    TIMER_A_CLOCKSOURCE_DIVIDER_1,
+    10000,
+    TIMER_A_CAPTURECOMPARE_REGISTER_4,
+    TIMER_A_OUTPUTMODE_RESET_SET,
+    4000
+};
+
+
+int main(void)
+{
+
+    // Stop watchdog timer
+    WDT_A_holdTimer();
+
+    /* Initializes Clock System */
+
+    CS_setDCOCenteredFrequency(CS_DCO_FREQUENCY_48);
+
+    CS_initClockSignal(CS_MCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
+    CS_initClockSignal(CS_HSMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
+    CS_initClockSignal(CS_SMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
+    CS_initClockSignal(CS_ACLK, CS_REFOCLK_SELECT, CS_CLOCK_DIVIDER_1);
+
+    if(! Interrupt_enableMaster())
+    {
+      Timer_A_generatePWM(TIMER_A0_BASE, &pwmConfig);
+    }
+
+
+    Crystalfontz128x128_Init();
+    Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_UP);
+
+    Graphics_initContext(&g_sContext, &g_sCrystalfontz128x128, &g_sCrystalfontz128x128_funcs);
+    Graphics_setForegroundColor(&g_sContext, GRAPHICS_COLOR_WHITE);
+    Graphics_setBackgroundColor(&g_sContext, GRAPHICS_COLOR_BLACK);
+    GrContextFontSet(&g_sContext, &g_sFontFixed6x8);
+    Graphics_clearDisplay(&g_sContext);
+
+
+
+    initializeDemoButtons();
+    // Draw Primitives image button
+    Graphics_drawImageButton(&g_sContext, &primitiveButton);
+
+
+
+    Graphics_Rectangle myRectangle1 = { 0, 0, 127 , 127};
+
+    Graphics_drawRectangle(&g_sContext, &myRectangle1);
+
+    // Draw Images image button
+    Graphics_drawImageButton(&g_sContext, &imageButton);
+    while(1)
+    {
+        BUZZER_toggle();
+
+    }
+
+
+}
+
+
+void initializeDemoButtons(void)
+{
+    // Initiliaze primitives Demo Button
+    primitiveButton.xPosition = 0;
+    primitiveButton.yPosition = 0;
+    primitiveButton.borderWidth = 3;
+    primitiveButton.selected = false;
+    //primitiveButton.imageWidth = Primitives_Button4BPP_UNCOMP.xSize;
+    //primitiveButton.imageHeight = Primitives_Button4BPP_UNCOMP.ySize;
+    primitiveButton.imageWidth = 10;
+    primitiveButton.imageHeight = 10;
+    primitiveButton.borderColor = GRAPHICS_COLOR_WHITE;
+    primitiveButton.selectedColor = GRAPHICS_COLOR_RED;
+    primitiveButton.image = &Primitives_Button4BPP_UNCOMP;
+
+    // Initiliaze images Demo Button
+    imageButton.xPosition = 10;
+    imageButton.yPosition = 10;
+    imageButton.borderWidth = 3;
+    imageButton.selected = false;
+    imageButton.imageWidth = Primitives_Button4BPP_UNCOMP.xSize;
+    imageButton.imageHeight = Primitives_Button4BPP_UNCOMP.ySize;
+    imageButton.borderColor = GRAPHICS_COLOR_WHITE;
+    imageButton.selectedColor = GRAPHICS_COLOR_RED;
+    imageButton.image = &Images_Button4BPP_UNCOMP;
+
+    yesButton.xMin = 0;
+    yesButton.xMax = 20;
+    yesButton.yMin = 110;
+    yesButton.yMax = 127;
+    yesButton.borderWidth = 1;
+    yesButton.selected = false;
+    yesButton.fillColor = GRAPHICS_COLOR_RED;
+    yesButton.borderColor = GRAPHICS_COLOR_RED;
+    yesButton.selectedColor = GRAPHICS_COLOR_BLACK;
+    yesButton.textColor = GRAPHICS_COLOR_BLACK;
+    yesButton.selectedTextColor = GRAPHICS_COLOR_RED;
+    yesButton.textXPos = 25;
+    yesButton.textYPos = 20;
+    yesButton.text = "YES";
+    yesButton.font = &g_sFontFixed6x8;
+
+    noButton.xMin = 90;
+    noButton.xMax = 120;
+    noButton.yMin = 40;
+    noButton.yMax = 120;
+    noButton.borderWidth = 1;
+    noButton.selected = false;
+    noButton.fillColor = GRAPHICS_COLOR_RED;
+    noButton.borderColor = GRAPHICS_COLOR_RED;
+    noButton.selectedColor = GRAPHICS_COLOR_BLACK;
+    noButton.textColor = GRAPHICS_COLOR_BLACK;
+    noButton.selectedTextColor = GRAPHICS_COLOR_RED;
+    noButton.textXPos = 100;
+    noButton.textYPos = 45;
+    noButton.text = "NO";
+    noButton.font = &g_sFontFixed6x8;
+}
+
+
+void BUZZER_toggle()
+{
+    if( GPIO_getInputPinValue(GPIO_PORT_P5, GPIO_PIN1) == GPIO_INPUT_PIN_LOW)
+    {
+        if( !(TIMER_A_CMSIS(TIMER_A0_BASE)->CTL & TIMER_A_CTL_MC_3) )
+            Timer_A_generatePWM(TIMER_A0_BASE, &pwmConfig);
+    }
+    else
+    {
+        Timer_A_stopTimer(TIMER_A0_BASE);
+    }
+}
+
+// UART interrupt service routine
+void EUSCIA0_IRQHandler(void)
+
+{
+
+    if(UCA0IFG & UCRXIFG)
+
+    {
+
+     while(!(UCA0IFG&UCTXIFG));
+
+     UCA0TXBUF = UCA0RXBUF;
+
+     __no_operation();
+
+    }
+
+}
